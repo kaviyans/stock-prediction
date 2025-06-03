@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Price Predictor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; /* Light gray background */
+        }
+        /* Custom styles for responsiveness and centering */
+        .container {
+            max-width: 90%; /* Fluid width */
+        }
+        @media (min-width: 768px) {
+            .container {
+                max-width: 768px; /* Max width for medium screens */
+            }
+        }
+        @media (min-width: 1024px) {
+            .container {
+                max-width: 1024px; /* Max width for large screens */
+            }
+        }
+        canvas {
+            max-height: 400px; /* Limit chart height */
+            width: 100% !important; /* Ensure canvas takes full width of its container */
+            height: auto !important; /* Maintain aspect ratio */
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+    <div class="container mx-auto bg-white p-8 rounded-lg shadow-xl border border-gray-200">
+        <h1 class="text-4xl font-bold text-center text-gray-800 mb-8">Stock Price Predictor</h1>
+
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8">
+            <input
+                type="text"
+                id="ticker"
+                placeholder="Enter Ticker (e.g., AAPL, NVDA)"
+                class="p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent w-full sm:w-2/3 md:w-1/2 lg:w-1/3 text-lg"
+            />
+            <button
+                onclick="getPrediction()"
+                class="px-6 py-3 bg-blue-600 text-white font-semibold rounded-md shadow-lg hover:bg-blue-700 transition duration-300 ease-in-out transform hover:scale-105 w-full sm:w-auto text-lg"
+            >
+                Get Prediction
+            </button>
+        </div>
+
+        <div id="error" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-md relative mb-6" role="alert">
+            <strong class="font-bold">Error!</strong>
+            <span class="block sm:inline" id="error-message"></span>
+        </div>
+
+        <div id="result" class="hidden bg-gray-50 p-6 rounded-lg border border-gray-200 mb-8">
+            <h2 class="text-2xl font-semibold text-gray-700 mb-4">
+                <span id="stock-ticker" class="text-blue-600"></span> Stock Data
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-lg">
+                <p class="text-gray-700">
+                    <span class="font-medium">Latest Close:</span> <span id="latest-close" class="font-bold text-green-600"></span>
+                </p>
+                <p class="text-gray-700">
+                    <span class="font-medium">Predicted Next Day Close:</span> <span id="predicted-close" class="font-bold text-purple-600"></span>
+                </p>
+            </div>
+
+            <div class="mt-8 bg-white p-4 rounded-lg shadow-inner border border-gray-100">
+                <h3 class="text-xl font-semibold text-gray-700 mb-4">Last 30 Days Close Price</h3>
+                <div class="relative h-64 md:h-80 lg:h-96"> <canvas id="priceChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let chart = null; // Global variable to hold the Chart.js instance
+
+        /**
+         * Fetches stock prediction data from the backend and updates the UI.
+         * Renders a line chart of historical closing prices.
+         */
+        async function getPrediction() {
+            const tickerInput = document.getElementById('ticker');
+            const ticker = tickerInput.value.trim();
+            const resultDiv = document.getElementById('result');
+            const errorDiv = document.getElementById('error');
+            const errorMessageSpan = document.getElementById('error-message');
+            const priceChartCanvas = document.getElementById('priceChart');
+
+
+            // Hide previous results and errors
+            resultDiv.classList.add('hidden');
+            errorDiv.classList.add('hidden');
+            errorMessageSpan.textContent = ''; // Clear previous error message
+
+            // Basic input validation
+            if (!ticker) {
+                errorMessageSpan.textContent = 'Please enter a stock ticker symbol.';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+
+            try {
+                // Fetch data from the Flask backend
+                // Note: The URL assumes your Flask app is running on http://127.0.0.1:5000
+                const response = await fetch(`http://127.0.0.1:5000/predict?ticker=${ticker}`);
+                const data = await response.json();
+
+                console.log("Response data from backend:", data); // Log the response data for debugging
+
+                if (response.ok) {
+                    // Update UI with fetched data
+                    document.getElementById('stock-ticker').textContent = data.ticker;
+                    document.getElementById('latest-close').textContent = data.latest_close; // Now includes '₹'
+                    document.getElementById('predicted-close').textContent = data.predicted_close; // Now includes '₹'
+                    resultDiv.classList.remove('hidden'); // Show results section
+
+                    // --- FIX: Flatten the data.closes array ---
+                    // Chart.js expects an array of numbers, not an array of single-element arrays.
+                    const flattenedCloses = data.closes.map(item => item[0]);
+                    console.log("Flattened Chart data (closes):", flattenedCloses); // Verify the flattened array
+
+                    // Check data types of 'closes' array elements (now using flattenedCloses)
+                    if (flattenedCloses && flattenedCloses.length > 0) {
+                        const firstCloseValue = flattenedCloses[0];
+                        console.log(`Type of first flattened close value (${firstCloseValue}):`, typeof firstCloseValue);
+                        // Check if all values are numbers
+                        const allNumbers = flattenedCloses.every(val => typeof val === 'number' && !isNaN(val));
+                        console.log("All 'flattenedCloses' values are valid numbers:", allNumbers);
+                        if (!allNumbers) {
+                            console.warn("Some 'flattenedCloses' values are not valid numbers. This might prevent Chart.js from plotting.");
+                        }
+                    } else {
+                        console.warn("flattenedCloses array is empty or null. Chart will not display data.");
+                    }
+
+                    // Check canvas dimensions after resultDiv is made visible
+                    // Use a small delay to ensure DOM has rendered visibility changes
+                    setTimeout(() => {
+                        console.log("Canvas clientWidth:", priceChartCanvas.clientWidth);
+                        console.log("Canvas clientHeight:", priceChartCanvas.clientHeight);
+                        if (priceChartCanvas.clientWidth === 0 || priceChartCanvas.clientHeight === 0) {
+                            console.error("Canvas has zero dimensions. Chart will not be visible.");
+                        }
+                    }, 50); // Small delay
+
+
+                    // Get the canvas context for Chart.js
+                    const ctx = priceChartCanvas.getContext('2d');
+
+                    // If a chart instance already exists, destroy it to prevent duplicates
+                    if (chart) {
+                        chart.destroy();
+                    }
+
+                    // Create a new Chart.js line chart
+                    chart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: data.dates, // Dates for the x-axis
+                            datasets: [{
+                                label: 'Close Price',
+                                data: flattenedCloses, // Use the flattened array here!
+                                borderColor: 'rgba(75, 192, 192, 1)', // Line color
+                                backgroundColor: 'rgba(75, 192, 192, 0.2)', // Area fill color
+                                fill: true, // Fill area under the line
+                                tension: 0.1, // Smoothness of the line
+                                pointRadius: 3, // Size of data points
+                                pointBackgroundColor: 'rgba(75, 192, 192, 1)',
+                                pointBorderColor: '#fff',
+                                pointHoverRadius: 5,
+                            }]
+                        },
+                        options: {
+                            responsive: true, // Chart resizes with container
+                            maintainAspectRatio: false, // Do not force aspect ratio
+                            plugins: {
+                                legend: {
+                                    display: true, // Show legend
+                                    position: 'top', // Position legend at the top
+                                    labels: {
+                                        font: {
+                                            size: 14,
+                                            family: 'Inter'
+                                        }
+                                    }
+                                },
+                                tooltip: {
+                                    mode: 'index',
+                                    intersect: false,
+                                    bodyFont: {
+                                        family: 'Inter'
+                                    },
+                                    titleFont: {
+                                        family: 'Inter'
+                                    }
+                                }
+                            },
+                            scales: {
+                                x: {
+                                    display: true,
+                                    title: {
+                                        display: true,
+                                        text: 'Date',
+                                        color: '#333',
+                                        font: {
+                                            size: 16,
+                                            weight: 'bold',
+                                            family: 'Inter'
+                                        }
+                                    },
+                                    ticks: {
+                                        maxTicksLimit: 7, // Limit number of ticks on x-axis for readability
+                                        color: '#555',
+                                        font: {
+                                            family: 'Inter'
+                                        }
+                                    },
+                                    grid: {
+                                        display: false // Hide x-axis grid lines
+                                    }
+                                },
+                                y: {
+                                    display: true,
+                                    title: {
+                                        display: true,
+                                        text: 'Price (INR)',
+                                        color: '#333',
+                                        font: {
+                                            size: 16,
+                                            weight: 'bold',
+                                            family: 'Inter'
+                                        }
+                                    },
+                                    beginAtZero: false, // Y-axis does not necessarily start at zero
+                                    ticks: {
+                                        color: '#555',
+                                        font: {
+                                            family: 'Inter'
+                                        },
+                                        // --- NEW: Callback to format Y-axis ticks with Rupee symbol and multiplication ---
+                                        callback: function(value, index, values) {
+                                            return '₹' + (value * 85).toFixed(2); // Multiply by 85 and format to 2 decimal places
+                                        }
+                                    },
+                                    grid: {
+                                        color: 'rgba(200, 200, 200, 0.2)' // Light y-axis grid lines
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                } else {
+                    // Display error message from the backend
+                    errorMessageSpan.textContent = data.error || 'Error fetching data.';
+                    errorDiv.classList.remove('hidden');
+                }
+            } catch (err) {
+                // Handle network or other unexpected errors
+                console.error("Fetch error:", err);
+                errorMessageSpan.textContent = 'Failed to connect to the prediction server. Please ensure the backend is running.';
+                errorDiv.classList.remove('hidden');
+            }
+        }
+
+        // Call getPrediction with a default ticker when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('ticker').value = 'NVDA'; // Set a default ticker
+            getPrediction();
+        });
+    </script>
+</body>
+</html>
